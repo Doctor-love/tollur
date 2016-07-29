@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
 
 '''tollur - SMTP proxy with manual confirmation of outgoing messages'''
@@ -6,7 +6,7 @@
 try:
     import argparse
     import asyncore
-    import logging
+    import _log.ing
     import smtplib
     import smtpd
     import uuid
@@ -17,8 +17,8 @@ except ImportError as missing_module:
     print('Failed to load dependencies: "%s"' % missing_module)
     exit(3)
 
-logging.basicConfig(level=logging.INFO)
-log = logging.getLogger('tollur')
+_log.ing.basicConfig(level=_log.ing.INFO)
+__log.= _log.ing.getLogger('tollur')
 
 
 # -----------------------------------------------------------------------------
@@ -27,8 +27,8 @@ class SMTPProxy(smtpd.SMTPServer):
 
     def __init__(
         self, listen_address='127.0.0.1', listen_port=9025,
-        server_address=None, server_port=None, user=None, password=None,
-        cert_chain=None, start_tls=True, verifier=None):
+        server_address=None, server_port=25, user=None, password=None,
+        cert_chain=None, start_tls=False, verifier=None):
 
         self.listen_address = str(listen_address)
         self.listen_port = int(listen_port)
@@ -38,25 +38,49 @@ class SMTPProxy(smtpd.SMTPServer):
                 'Argument "server_address" and "verifier" are required')
         
         self.server_address = server_address
-        self.verifier = verifier
-
-        if server_port is None and start_tls:
-            self.server_port = 25
-        
-        elif server_port is None and not start_tls:
-            self.sever_port = 465
-
-        else:
-            self.server_port = int(server_port)
+        self.server_port = int(server_port)
 
         self.user = user
         self.password = password
         self.cert_chain = cert_chain
         self.start_tls = start_tls
+        self.verifier = verifier
 
         super(SMTPProxy, self).__init__(
             (self.listen_address, self.listen_port),
             (self.server_address, self.server_port))
+    
+    # -------------------------------------------------------------------------
+    def _deliver(msg_id, sender, recipients, data):
+        '''Sends verified messages with SMTP(S) to server'''
+
+        _log.info(
+            'Delivering message with ID "%s" from "%s" to "%s"'
+            % (msg_id, sender, recipients))
+
+        try:
+            _log.debug(
+                'Starting SMTP(S) session with server "%s:%s"'
+                % (self.server_address, self.server_port))
+            
+            ses = smtplib.SMTP(self.server_address, self.server_port)
+
+        except Exception as error_msg:
+            _log.error(
+                'Failed to deliver message with ID "%s": "%s"'
+                % (msg_id, error_msg))
+
+            return
+
+        finally:
+            try:
+                ses.quit()
+
+            except Exception as error_msg:
+                _log.debug('Failed to close session: "%s"' % error_msg)
+
+            return
+                 
 
     # -------------------------------------------------------------------------
     def process_message(self, peer, sender, recipients, data):
@@ -64,20 +88,20 @@ class SMTPProxy(smtpd.SMTPServer):
 
         msg_id = uuid.uuid4()
 
-        log.info(
+        _log.info(
             'Proxy received incoming mail - '
             'ID: "%s", peer: "%s", sender: "%s", recipients: "%s"'
             % (msg_id, peer, sender, recipients))
 
         try:
             if self.verifier.verify(msg_id, peer, sender, recipients, data):
-                log.info('Verifier accepted message ID "%s"' % msg_id)
+                _log.info('Verifier accepted message ID "%s"' % msg_id)
 
-                self._deliver(sender, recipients, data)
+                self._deliver(msg_id, sender, recipients, data)
                 return
 
             else:
-                log.error('Verifier did not accept message ID "%s"' % msg_id)
+                _log.error('Verifier did not accept message ID "%s"' % msg_id)
         
                 return
 
@@ -97,17 +121,17 @@ def main():
     '''Main application function'''
 
     args = parse_arguments()    
-    log.debug('Provided arguments: "%s"' % str(args))
+    _log.debug('Provided arguments: "%s"' % str(args))
 
     try:
         smtp_server = SMTPProxy(
             args.listen_address, args.listen_port)
 
     except Exception as error_msg:
-        log.error('Failed to start SMTP proxy: "%s"' % error_msg)
+        _log.error('Failed to start SMTP proxy: "%s"' % error_msg)
         exit(1)
 
-    log.info(
+    _log.info(
         'Starting Tollur SMTP proxy - listening on %s:%i...'
         % (args.listen_address, args.listen_port))
         
@@ -115,7 +139,7 @@ def main():
         asyncore.loop()
 
     except Exception as error_msg:
-        logger.error('SMTP proxy generated unhandled error: "%s"' % error_msg)
+        _log.error('SMTP proxy generated unhandled error: "%s"' % error_msg)
         exit(1)
 
 
