@@ -3,10 +3,12 @@
 
 '''tollur - SMTP proxy with manual confirmation of outgoing messages'''
 
+DESCRIPTION=__doc__
+
 try:
     import argparse
     import asyncore
-    import _log.ing
+    import logging
     import smtplib
     import smtpd
     import uuid
@@ -17,8 +19,8 @@ except ImportError as missing_module:
     print('Failed to load dependencies: "%s"' % missing_module)
     exit(3)
 
-_log.ing.basicConfig(level=_log.ing.INFO)
-__log.= _log.ing.getLogger('tollur')
+logging.basicConfig(level=logging.DEBUG)
+_log = logging.getLogger('tollur')
 
 
 # -----------------------------------------------------------------------------
@@ -79,8 +81,7 @@ class SMTPProxy(smtpd.SMTPServer):
             except Exception as error_msg:
                 _log.debug('Failed to close session: "%s"' % error_msg)
 
-            return
-                 
+            return                 
 
     # -------------------------------------------------------------------------
     def process_message(self, peer, sender, recipients, data):
@@ -109,11 +110,39 @@ class SMTPProxy(smtpd.SMTPServer):
             raise VerificationError(
                 'Verifier raised unhandled exception: "%s"' % error_msg)
 
+
 # -----------------------------------------------------------------------------
 def parse_arguments():
     '''Parses command line arguments'''
 
-    pass
+    parser = argparse.ArgumentParser(description=DESCRIPTION)
+
+    parser.add_argument(
+        '-l', '--listen-address', dest='listen_address',
+        metavar='ADDR', type=str, default='127.0.0.1', required=True,
+        help='Listening address for SMTP proxy (default: %(default)s')
+    
+    parser.add_argument(
+        '-p', '--listen-port', dest='listen_port',
+        metavar='PORT', type=int, default=9025, required=True,
+        help='Listening port for SMTP proxy (default: %(default)i')
+    
+    parser.add_argument(
+        '-s', '--server-address', dest='server_address',
+        metavar='ADDR', type=str, required=True,
+        help='Address for remote SMTP server')
+    
+    parser.add_argument(
+        '-P', '--server-port', dest='server_address',
+        metavar='PORT', type=int, default=25, required=True,
+        help='Port for remote SMTP server (default: %(default)i')
+        
+
+        self.user = user
+        self.password = password
+        self.cert_chain = cert_chain
+        self.start_tls = start_tls
+        self.verifier = verifier
 
 
 # -----------------------------------------------------------------------------
