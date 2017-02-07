@@ -4,8 +4,10 @@
 '''tollur - SMTP proxy with manual confirmation of outgoing messages'''
 
 DESCRIPTION=__doc__
+URL='https://github.com/a-laget/tollur'
 
 try:
+    import configparser
     import argparse
     import asyncore
     import logging
@@ -115,34 +117,44 @@ class SMTPProxy(smtpd.SMTPServer):
 def parse_arguments():
     '''Parses command line arguments'''
 
-    parser = argparse.ArgumentParser(description=DESCRIPTION)
+    parser = argparse.ArgumentParser(
+        description=DESCRIPTION,
+        epilog='For information about configuration options, see: %s' % URL)
 
     parser.add_argument(
-        '-l', '--listen-address', dest='listen_address',
-        metavar='ADDR', type=str, default='127.0.0.1', required=True,
-        help='Listening address for SMTP proxy (default: %(default)s')
+        dest='conf_file',
+        metavar='/path/to/conf.ini', type=argparse.FileType('r'),
+        help='Path to tollur configuration file')    
     
-    parser.add_argument(
-        '-p', '--listen-port', dest='listen_port',
-        metavar='PORT', type=int, default=9025, required=True,
-        help='Listening port for SMTP proxy (default: %(default)i')
-    
-    parser.add_argument(
-        '-s', '--server-address', dest='server_address',
-        metavar='ADDR', type=str, required=True,
-        help='Address for remote SMTP server')
-    
-    parser.add_argument(
-        '-P', '--server-port', dest='server_address',
-        metavar='PORT', type=int, default=25, required=True,
-        help='Port for remote SMTP server (default: %(default)i')
-        
+    return parser.parse_args()
 
-        self.user = user
-        self.password = password
-        self.cert_chain = cert_chain
-        self.start_tls = start_tls
-        self.verifier = verifier
+
+# -----------------------------------------------------------------------------
+def parse_conf(conf_file):
+    '''Parses configuration file as INI an checks required values'''  
+
+    conf = configparser.ConfigParser()
+
+    try:
+        conf.read_file(conf_file)
+
+        # Various error checking of provided configuration file
+        for section in ['main', 'listen', 'server']:
+            if not section in conf:
+                raise Exception(
+                    'Section "%s" required in configurationi file' % section)
+
+        if not 'verifier' in conf['main']:
+            raise Exception('Verifier needs to be specified in "main" section')
+
+        if not conf['main']['verifier'] in conf:
+            raise Exception('Configuration section for verifier is required')
+
+    except Exception as error_msg:
+        raise Exception('Failed to parse configuration file: "%s"' % error_msg)
+
+    # TODO: Add more error checking of configuration
+    return conf
 
 
 # -----------------------------------------------------------------------------
@@ -150,11 +162,11 @@ def main():
     '''Main application function'''
 
     args = parse_arguments()    
-    _log.debug('Provided arguments: "%s"' % str(args))
+    conf = parse_conf(args.conf_file)
 
     try:
         smtp_server = SMTPProxy(
-            args.listen_address, args.listen_port)
+            conf['listen']['address'], conf['listen']['port'])
 
     except Exception as error_msg:
         _log.error('Failed to start SMTP proxy: "%s"' % error_msg)
