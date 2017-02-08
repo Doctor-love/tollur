@@ -32,7 +32,7 @@ class SMTPProxy(smtpd.SMTPServer):
     def __init__(
         self, listen_address='127.0.0.1', listen_port=9025,
         server_address=None, server_port=25, user=None, password=None,
-        cert_chain=None, start_tls=False, verifier=None):
+        ca_store=None, start_tls=False, verifier=None):
 
         self.listen_address = str(listen_address)
         self.listen_port = int(listen_port)
@@ -46,7 +46,7 @@ class SMTPProxy(smtpd.SMTPServer):
 
         self.user = user
         self.password = password
-        self.cert_chain = cert_chain
+        self.ca_store = ca_store
         self.start_tls = start_tls
         self.verifier = verifier
 
@@ -158,26 +158,69 @@ def parse_conf(conf_file):
 
 
 # -----------------------------------------------------------------------------
+def setup_logging(dest, level):
+    '''Configures application logging settings'''
+
+    # TODO: Acctually do something here!
+    pass
+
+
+# -----------------------------------------------------------------------------
+def init_verifier(name, conf):
+    '''Loads verifier module and sets it up with provided configuration'''
+
+    # TODO: Acctually do something here!
+    return 'FISK'
+
+
+# -----------------------------------------------------------------------------
 def main():
     '''Main application function'''
 
     args = parse_arguments()    
-    conf = parse_conf(args.conf_file)
+
+    try:
+        conf = parse_conf(args.conf_file)
+
+    except Exception as error_msg:
+        # _log is not used here since it's settings are specified in the config
+        print(error_msg)
+        exit(1)
+
+    setup_logging(conf['main']['log_dest'], conf['main']['log_level'])
+
+    # -------------------------------------------------------------------------
+    try:
+        verifier_name = conf['main']['verifier']
+        verifier = init_verifier(verifier_name, conf[verifier_name])
+
+    except Exception as error_msg:
+        _log.error(error_msg)
+        exit(1)
 
     try:
         smtp_server = SMTPProxy(
-            conf['listen']['address'], conf['listen']['port'])
+            conf['listen']['address'], int(conf['listen']['port']),
+            conf['server']['address'], int(conf['server']['port']),
+            conf['server']['user'], conf['server']['password'],
+            conf['server']['ca_store'],
+            conf['server'].getboolean('start_tls'), verifier)
 
     except Exception as error_msg:
-        _log.error('Failed to start SMTP proxy: "%s"' % error_msg)
+        _log.error('Failed to configure SMTP proxy: "%s"' % error_msg)
         exit(1)
 
+    # -------------------------------------------------------------------------
     _log.info(
         'Starting Tollur SMTP proxy - listening on %s:%i...'
-        % (args.listen_address, args.listen_port))
+        % (conf['listen']['address'], int(conf['listen']['port'])))
         
     try:
         asyncore.loop()
+
+    except KeyboardInterrupt:
+        _log.info('Tollur was interrupted by keyboard - exiting...')
+        exit(3)
 
     except Exception as error_msg:
         _log.error('SMTP proxy generated unhandled error: "%s"' % error_msg)
