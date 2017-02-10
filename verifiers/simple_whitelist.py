@@ -31,7 +31,7 @@ class Verifier:
             if domain not in self.whitelist_domains:
                 _log.info('Domain "%s" is not whitelisted!' % domain)
 
-                return True
+                return False
 
             _log.info('Everything looks good - accepting "%s"' % msg_id)
 

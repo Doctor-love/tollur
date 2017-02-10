@@ -4,7 +4,7 @@
 '''tollur - SMTP proxy with manual confirmation of outgoing messages'''
 
 DESCRIPTION=__doc__
-VERSION='0.1 / "Is it really working?!"'
+VERSION='0.2 / "The Morning After"'
 URL='https://github.com/a-laget/tollur'
 
 try:
@@ -26,8 +26,33 @@ except ImportError as missing_module:
 logging.basicConfig(level=logging.DEBUG)
 _log = logging.getLogger('tollur')
 
-# Needed to prevent information leakage from the SMTP server
-smtpd.__version__ = 'SMTP PROXY'
+
+# -----------------------------------------------------------------------------
+class DebugToLog:
+    '''Writes smtpd\'s debug stream to standard logging'''
+
+    def write(self, msg):
+        # Let's avoid printing the debug streams empty messages, shall we!
+        if str(msg).strip():
+            _log.debug('EXT: smtpd debug stream: "%s"' % str(msg))
+
+    def flush(self):
+        pass
+
+
+# -----------------------------------------------------------------------------
+class SMTPClient(smtplib.SMTP):
+    '''SMTP client with some improved logging and various goodies'''
+
+    def _print_debug(self, *args):
+        '''Used to send smtplib\'s debug stream to standard logging'''
+
+        msg = ''
+
+        for arg in args:
+            msg += str(arg)
+
+        _log.debug('EXT: smtlib debug stream: "%s"' % msg)
 
 
 # -----------------------------------------------------------------------------
@@ -58,6 +83,19 @@ class SMTPProxy(smtpd.SMTPServer):
         super(SMTPProxy, self).__init__(
             (self.listen_address, self.listen_port),
             (self.server_address, self.server_port))
+
+    # -------------------------------------------------------------------------
+    def handle_accept(self):
+        '''Modified connection handler, as the super does not expose channel'''
+
+        pair = self.accept()
+
+        if pair is not None:
+            connection, address = pair
+
+            _log.debug('Incoming connection from %s' % repr(address))
+
+            self.channel = smtpd.SMTPChannel(self, connection, address)
     
     # -------------------------------------------------------------------------
     def _deliver(self, msg_id, sender, recipients, data):
@@ -72,28 +110,34 @@ class SMTPProxy(smtpd.SMTPServer):
                 'Starting SMTP(S) session with server "%s:%s"'
                 % (self.server_address, self.server_port))
             
-            ses = smtplib.SMTP(self.server_address, self.server_port)
+            SMTPClient.debuglevel = 1
+            ses = SMTPClient(self.server_address, self.server_port)
+
+            ses.sendmail(sender, recipients, data)
 
         except Exception as error_msg:
             _log.error(
                 'Failed to deliver message with ID "%s": "%s"'
                 % (msg_id, error_msg))
 
-            self.push('550 Error: Message ID "%s" was rejected' % msg_id)
+            self.channel.push('451 Error: Could not deliver ID "%s"' % msg_id)
+
             return
 
         finally:
             try:
                 ses.quit()
 
+            # This exception is raised if the session failed to be established
+            except UnboundLocalError:
+                pass
+
             except Exception as error_msg:
                 _log.debug(
                     'Failed to close session gracefully for ID "%s": "%s"'
                     % (msg_id, error_msg))
 
-                self.push('451 Error: Could not deliver ID "%s"' % msg_id)
-
-            return                 
+        return                 
 
     # -------------------------------------------------------------------------
     def process_message(self, peer, sender, recipients, data):
@@ -115,7 +159,10 @@ class SMTPProxy(smtpd.SMTPServer):
 
             else:
                 _log.error('Verifier did not accept message ID "%s"' % msg_id)
-        
+            
+                self.channel.push(
+                    '550 Error: ID "%s" was denied by verifier' % msg_id)
+
                 return
 
         except Exception as error_msg:
@@ -232,6 +279,11 @@ def main():
     except Exception as error_msg:
         _log.error(error_msg)
         sys.exit(1)
+
+    # -------------------------------------------------------------------------
+    # Needed to prevent information leakage from the SMTP server
+    smtpd.__version__ = 'SMTP PROXY'
+    smtpd.DEBUGSTREAM = DebugToLog()
 
     try:
         smtp_server = SMTPProxy(
