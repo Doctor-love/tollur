@@ -1,5 +1,5 @@
-# tollur - SMTP proxy with manual confirmation of outgoing messages
-#### Version 0.2 / "The Morning After"
+# tollur - A scriptable SMTP proxy
+#### Version 0.3 / "After Pleasure Comes Pain"
 
 ## Introduction
 Tollur is small SMTP proxy that requires each outgoing message to be "verified" before it's forwarded.  
@@ -19,6 +19,10 @@ The "verifiers" directory contains a simple example of such a plugin, which chec
 
 ## Usage
 At the moment, the code and example configuration is probably the best source for usage information
+
+
+## Commercial support
+Triple nine SLA and professional consulting is available for Fortune 500 companies
 
 
 ## Dependencies

@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 # vim: tabstop=8 expandtab shiftwidth=4 softtabstop=4
 
-'''tollur - SMTP proxy with manual confirmation of outgoing messages'''
+'''tollur - A scriptable SMTP proxy'''
 
 DESCRIPTION=__doc__
-VERSION='0.2 / "The Morning After"'
+VERSION='0.3 / "After Pleasure Comes Pain"'
 URL='https://github.com/a-laget/tollur'
 
 try:
+    import logging.handlers
     import configparser
     import importlib
     import argparse
@@ -22,8 +23,6 @@ except ImportError as missing_module:
     print('Failed to load dependencies: "%s"' % missing_module)
     sys.exit(3)
 
-# TODO: Handle the logging in a cleaner fashion
-logging.basicConfig(level=logging.DEBUG)
 _log = logging.getLogger('tollur')
 
 
@@ -112,6 +111,10 @@ class SMTPProxy(smtpd.SMTPServer):
             
             SMTPClient.debuglevel = 1
             ses = SMTPClient(self.server_address, self.server_port)
+
+            if self.user and self.password:
+                _log.debug('Trying to authenticate as user "%s"' % self.user)
+                ses.login(self.user, self.password)
 
             ses.sendmail(sender, recipients, data)
 
@@ -223,8 +226,28 @@ def parse_conf(conf_file):
 def setup_logging(dest, level):
     '''Configures application logging settings'''
 
-    # TODO: Acctually do something here!
-    pass
+    log_formatter = logging.Formatter(
+        'tollur: %(levelname)s - %(message)s')
+
+    if level == "debug":
+        _log.setLevel(logging.DEBUG)
+    
+    elif level == "error":
+        _log.setLevel(logging.ERROR)
+
+    else:
+        _log.setLevel(logging.INFO)
+
+    if dest == 'stderr':
+        log_handler = logging.StreamHandler()
+
+    elif dest == 'syslog':
+        log_handler = logging.handlers.SysLogHandler(address='/dev/log')
+
+    log_handler.setFormatter(log_formatter)
+    _log.addHandler(log_handler)
+
+    return
 
 
 # -----------------------------------------------------------------------------
