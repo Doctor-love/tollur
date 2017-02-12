@@ -4,7 +4,7 @@
 '''tollur - A scriptable SMTP proxy'''
 
 DESCRIPTION=__doc__
-VERSION='0.3 / "After Pleasure Comes Pain"'
+VERSION='0.4 / "Long Term Unstable"'
 URL='https://github.com/a-laget/tollur'
 
 try:
@@ -17,10 +17,15 @@ try:
     import smtplib
     import smtpd
     import uuid
+    import ssl
     import sys
 
 except ImportError as missing_module:
     print('Failed to load dependencies: "%s"' % missing_module)
+    sys.exit(3)
+
+if sys.version_info < (3, 5):
+    print('Tollur requires Python 3.5 or newer - sorry!\n')
     sys.exit(3)
 
 _log = logging.getLogger('tollur')
@@ -42,6 +47,25 @@ class DebugToLog:
 # -----------------------------------------------------------------------------
 class SMTPClient(smtplib.SMTP):
     '''SMTP client with some improved logging and various goodies'''
+                
+    debuglevel = 1
+
+    def _print_debug(self, *args):
+        '''Used to send smtplib\'s debug stream to standard logging'''
+
+        msg = ''
+
+        for arg in args:
+            msg += str(arg)
+
+        _log.debug('EXT: smtlib debug stream: "%s"' % msg)
+
+
+# -----------------------------------------------------------------------------
+class SMTPSClient(smtplib.SMTP_SSL):
+    '''SMTPS client with some improved logging and various goodies'''
+    
+    debuglevel = 1
 
     def _print_debug(self, *args):
         '''Used to send smtplib\'s debug stream to standard logging'''
@@ -57,11 +81,28 @@ class SMTPClient(smtplib.SMTP):
 # -----------------------------------------------------------------------------
 class SMTPProxy(smtpd.SMTPServer):
     '''SMTP proxy with manual confirmation of outgoing messages'''
+    
+    # -------------------------------------------------------------------------
+    def configure_tls(self):
+        '''Sets up the TLS context based on user preferences'''
 
+        if not self.tls_mode:
+            return None
+
+        if self.cipher_suites or self.tls_version:
+            raise Exception(
+                'Configuration of ciphers has not yet been implemented')
+
+        _log.debug('Setting up TLS context...')
+
+        return ssl.create_default_context(cafile=self.ca_store)
+
+    # -------------------------------------------------------------------------
     def __init__(
         self, listen_address='127.0.0.1', listen_port=9025,
         server_address=None, server_port=25, user=None, password=None,
-        ca_store=None, start_tls=False, verifier=None):
+        ca_store=None, tls_mode='start_tls', cipher_suites='',
+        tls_version=None, verifier=None):
 
         self.listen_address = str(listen_address)
         self.listen_port = int(listen_port)
@@ -76,8 +117,17 @@ class SMTPProxy(smtpd.SMTPServer):
         self.user = user
         self.password = password
         self.ca_store = ca_store
-        self.start_tls = start_tls
+        self.cipher_suites = cipher_suites
+        self.tls_version = tls_version
         self.verifier = verifier
+        
+        if tls_mode == "none":
+            self.tls_mode = None
+
+        else:
+            self.tls_mode = tls_mode
+
+        self.tls_context = self.configure_tls()
 
         super(SMTPProxy, self).__init__(
             (self.listen_address, self.listen_port),
@@ -108,10 +158,19 @@ class SMTPProxy(smtpd.SMTPServer):
             _log.debug(
                 'Starting SMTP(S) session with server "%s:%s"'
                 % (self.server_address, self.server_port))
-            
-            SMTPClient.debuglevel = 1
-            ses = SMTPClient(self.server_address, self.server_port)
 
+            if self.tls_mode is None or self.tls_mode == "start_tls":
+                ses = SMTPClient(self.server_address, self.server_port)
+
+            else:
+                ses = SMTPSClient(
+                    self.server_address, self.server_port,
+                    context=self.tls_context)
+
+            if self.tls_mode == "start_tls":
+                ses.starttls(context=self.tls_context)
+
+            # -----------------------------------------------------------------
             if self.user and self.password:
                 _log.debug('Trying to authenticate as user "%s"' % self.user)
                 ses.login(self.user, self.password)
@@ -313,8 +372,9 @@ def main():
             conf['listen']['address'], int(conf['listen']['port']),
             conf['server']['address'], int(conf['server']['port']),
             conf['server']['user'], conf['server']['password'],
-            conf['server']['ca_store'],
-            conf['server'].getboolean('start_tls'), verifier)
+            conf['server']['ca_store'], conf['server']['tls_mode'],
+            conf['server']['cipher_suites'], conf['server']['tls_version'],
+            verifier)
 
     except Exception as error_msg:
         _log.error('Failed to configure SMTP proxy: "%s"' % error_msg)
