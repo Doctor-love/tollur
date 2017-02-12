@@ -13,8 +13,9 @@ This is a test message
 '''
 
 try:
-   smtpObj = smtplib.SMTP('127.0.0.1', 9025)
-   smtpObj.sendmail(sender, receivers, message)         
+   smtplib.debuglevel = 1
+   ses = smtplib.SMTP('127.0.0.1', 9025)
+   ses.sendmail(sender, receivers, message)         
    print('Successfully sent email')
 
 except Exception as error_msg:

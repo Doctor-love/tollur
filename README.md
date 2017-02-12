@@ -1,5 +1,5 @@
 # tollur - A scriptable SMTP proxy
-#### Version 0.4 / "Long Term Unstable"
+#### Version 0.5 / "Introverted Socialite"
 
 ## Introduction
 Tollur is small SMTP proxy that requires each outgoing message to be "verified" before it's forwarded.  
@@ -14,6 +14,7 @@ The "verifiers" directory contains a simple example of such a plugin, which chec
 - Still very alpha, limited testing
 - Should not be trusted with anything precious, but can be used to proxy mail!
 - The code and the underlying components ("smtlib" and "smtpd") have not been audited for security issues
+- Suffers from some parallelization issues
 
 
 ## Usage
@@ -25,5 +26,6 @@ Triple nine SLA and professional consulting is available for Fortune 500 compani
 
 
 ## Dependencies
-- Python 3.5 or newver with the standard library
+- Python 3.5 or later with the standard library
+- OpenSSL version 0.9.8 or later for SMTPS and START_TLS
 - A lot of self control and limited respect for future you, trying to send some mail
