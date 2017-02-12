@@ -13,7 +13,6 @@ The "verifiers" directory contains a simple example of such a plugin, which chec
 ## Current status
 - Still very alpha, limited testing
 - Should not be trusted with anything precious, but can be used to proxy mail!
-- Does not support START_TLS or SMTPS
 - The code and the underlying components ("smtlib" and "smtpd") have not been audited for security issues
 
 
