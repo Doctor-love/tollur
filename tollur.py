@@ -25,8 +25,12 @@ except ImportError as missing_module:
     sys.exit(3)
 
 # Should probably work with older Python 3 versions as well, but not tested
-if sys.version_info < (3, 5):
+if sys.version_info < (3, 5) and ssl.OPENSSL_VERSION_INFO < (0, 9, 8):
     print('Tollur requires Python 3.5 or later - sorry!\n')
+    sys.exit(3)
+
+if ssl.OPENSSL_VERSION_INFO < (0, 9, 8):
+    print('Tollur requires OpenSSL 0.9.8 or later - sorry!\n')
     sys.exit(3)
 
 _log = logging.getLogger('tollur')
@@ -98,7 +102,18 @@ class SMTPProxy(smtpd.SMTPServer):
 
         # Used for certificate revocation of the whole chain
         context.verify_mode = ssl.CERT_REQUIRED
-        context.verify_flags = ssl.VERIFY_CRL_CHECK_CHAIN
+        context.check_hostname = True
+        
+        _log.debug(
+            'Loaded CA certs for upstream context: "%s"'
+            % str(context.get_ca_certs()))
+       
+
+        if self.upstream_crl_check == 'chain': 
+            context.verify_flags = ssl.VERIFY_CRL_CHECK_CHAIN
+        
+        elif self.upstream_crl_check == 'cert': 
+            context.verify_flags = ssl.VERIFY_CRL_CHECK_LEAF
 
         if self.upstream_cipher_suites:
             context.set_ciphers(self.upstream_cipher_suites)
@@ -110,7 +125,7 @@ class SMTPProxy(smtpd.SMTPServer):
         self, server_address='127.0.0.1', server_port=9025,
         upstream_address=None, upstream_port=25, user=None, password=None,
         ca_store=None, tls_mode='start_tls', upstream_cipher_suites='',
-        tls_version=None, verifier=None):
+        tls_version=None, upstream_crl_check='chain', verifier=None):
 
         self.server_address = str(server_address)
         self.server_port = int(server_port)
@@ -125,14 +140,13 @@ class SMTPProxy(smtpd.SMTPServer):
         self.user = user
         self.password = password
         self.ca_store = ca_store
-        self.upstream_cipher_suites = upstream_cipher_suites
+        self.tls_mode = tls_mode
         self.tls_version = tls_version
+        self.upstream_cipher_suites = upstream_cipher_suites
+        self.upstream_crl_check = upstream_crl_check
         self.verifier = verifier
-        
-        if tls_mode == "none":
-            self.tls_mode = None
 
-        else:
+        if self.tls_mode:
             self.tls_mode = tls_mode
             self.upstream_tls_context = self.configure_upstream_tls()
 
@@ -381,7 +395,7 @@ def main():
             conf['upstream']['user'], conf['upstream']['password'],
             conf['upstream']['ca_store'], conf['upstream']['tls_mode'],
             conf['upstream']['cipher_suites'], conf['upstream']['tls_version'],
-            verifier)
+            conf['upstream']['crl_check'], verifier)
 
     except Exception as error_msg:
         _log.error('Failed to configure SMTP proxy: "%s"' % error_msg)
