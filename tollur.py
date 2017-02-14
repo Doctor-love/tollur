@@ -98,17 +98,16 @@ class SMTPProxy(smtpd.SMTPServer):
 
         _log.debug('Setting up upstream TLS context...')
 
+        # Using a tweaked default context to minimize future "crypto rot"
         context = ssl.create_default_context(cafile=self.ca_store)
-
-        # Used for certificate revocation of the whole chain
-        context.verify_mode = ssl.CERT_REQUIRED
-        context.check_hostname = True
         
         _log.debug(
             'Loaded CA certs for upstream context: "%s"'
             % str(context.get_ca_certs()))
-       
 
+        context.verify_mode = ssl.CERT_REQUIRED
+        context.check_hostname = True
+       
         if self.upstream_crl_check == 'chain': 
             context.verify_flags = ssl.VERIFY_CRL_CHECK_CHAIN
         
@@ -118,6 +117,7 @@ class SMTPProxy(smtpd.SMTPServer):
         if self.upstream_cipher_suites:
             context.set_ciphers(self.upstream_cipher_suites)
 
+        # TODO: Setup ORing to blacklist non-configured TLS versions
         return context
 
     # -------------------------------------------------------------------------
