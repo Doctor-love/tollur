@@ -4,7 +4,7 @@
 '''tollur - A scriptable SMTP proxy'''
 
 DESCRIPTION=__doc__
-VERSION='0.4 / "Long Term Unstable"'
+VERSION='0.5 / "Introverted Socialite"'
 URL='https://github.com/a-laget/tollur'
 
 try:
@@ -24,8 +24,13 @@ except ImportError as missing_module:
     print('Failed to load dependencies: "%s"' % missing_module)
     sys.exit(3)
 
-if sys.version_info < (3, 5):
-    print('Tollur requires Python 3.5 or newer - sorry!\n')
+# Should probably work with older Python 3 versions as well, but not tested
+if sys.version_info < (3, 5) and ssl.OPENSSL_VERSION_INFO < (0, 9, 8):
+    print('Tollur requires Python 3.5 or later - sorry!\n')
+    sys.exit(3)
+
+if ssl.OPENSSL_VERSION_INFO < (0, 9, 8):
+    print('Tollur requires OpenSSL 0.9.8 or later - sorry!\n')
     sys.exit(3)
 
 _log = logging.getLogger('tollur')
@@ -53,6 +58,7 @@ class SMTPClient(smtplib.SMTP):
     def _print_debug(self, *args):
         '''Used to send smtplib\'s debug stream to standard logging'''
 
+        # Looks a bit strange, but smtplib passwd *args to print()
         msg = ''
 
         for arg in args:
@@ -83,55 +89,70 @@ class SMTPProxy(smtpd.SMTPServer):
     '''SMTP proxy with manual confirmation of outgoing messages'''
     
     # -------------------------------------------------------------------------
-    def configure_tls(self):
-        '''Sets up the TLS context based on user preferences'''
+    def configure_upstream_tls(self):
+        '''Sets up the TLS context for upstream based on user preferences'''
 
-        if not self.tls_mode:
-            return None
-
-        if self.cipher_suites or self.tls_version:
+        if self.tls_version:
             raise Exception(
-                'Configuration of ciphers has not yet been implemented')
+                'Configuration of TLS version has not yet been implemented')
 
-        _log.debug('Setting up TLS context...')
+        _log.debug('Setting up upstream TLS context...')
 
-        return ssl.create_default_context(cafile=self.ca_store)
+        context = ssl.create_default_context(cafile=self.ca_store)
+
+        # Used for certificate revocation of the whole chain
+        context.verify_mode = ssl.CERT_REQUIRED
+        context.check_hostname = True
+        
+        _log.debug(
+            'Loaded CA certs for upstream context: "%s"'
+            % str(context.get_ca_certs()))
+       
+
+        if self.upstream_crl_check == 'chain': 
+            context.verify_flags = ssl.VERIFY_CRL_CHECK_CHAIN
+        
+        elif self.upstream_crl_check == 'cert': 
+            context.verify_flags = ssl.VERIFY_CRL_CHECK_LEAF
+
+        if self.upstream_cipher_suites:
+            context.set_ciphers(self.upstream_cipher_suites)
+
+        return context
 
     # -------------------------------------------------------------------------
     def __init__(
-        self, listen_address='127.0.0.1', listen_port=9025,
-        server_address=None, server_port=25, user=None, password=None,
-        ca_store=None, tls_mode='start_tls', cipher_suites='',
-        tls_version=None, verifier=None):
+        self, server_address='127.0.0.1', server_port=9025,
+        upstream_address=None, upstream_port=25, user=None, password=None,
+        ca_store=None, tls_mode='start_tls', upstream_cipher_suites='',
+        tls_version=None, upstream_crl_check='chain', verifier=None):
 
-        self.listen_address = str(listen_address)
-        self.listen_port = int(listen_port)
-
-        if server_address is None or verifier is None:
-            raise TypeError(
-                'Argument "server_address" and "verifier" are required')
-        
-        self.server_address = server_address
+        self.server_address = str(server_address)
         self.server_port = int(server_port)
+
+        if upstream_address is None or verifier is None:
+            raise TypeError(
+                'Argument "upstream_address" and "verifier" are required')
+        
+        self.upstream_address = upstream_address
+        self.upstream_port = int(upstream_port)
 
         self.user = user
         self.password = password
         self.ca_store = ca_store
-        self.cipher_suites = cipher_suites
+        self.tls_mode = tls_mode
         self.tls_version = tls_version
+        self.upstream_cipher_suites = upstream_cipher_suites
+        self.upstream_crl_check = upstream_crl_check
         self.verifier = verifier
-        
-        if tls_mode == "none":
-            self.tls_mode = None
 
-        else:
+        if self.tls_mode:
             self.tls_mode = tls_mode
-
-        self.tls_context = self.configure_tls()
+            self.upstream_tls_context = self.configure_upstream_tls()
 
         super(SMTPProxy, self).__init__(
-            (self.listen_address, self.listen_port),
-            (self.server_address, self.server_port))
+            (self.server_address, self.server_port),
+            (self.upstream_address, self.upstream_port))
 
     # -------------------------------------------------------------------------
     def handle_accept(self):
@@ -157,18 +178,18 @@ class SMTPProxy(smtpd.SMTPServer):
         try:
             _log.debug(
                 'Starting SMTP(S) session with server "%s:%s"'
-                % (self.server_address, self.server_port))
+                % (self.upstream_address, self.upstream_port))
 
             if self.tls_mode is None or self.tls_mode == "start_tls":
-                ses = SMTPClient(self.server_address, self.server_port)
+                ses = SMTPClient(self.upstream_address, self.upstream_port)
 
             else:
                 ses = SMTPSClient(
-                    self.server_address, self.server_port,
-                    context=self.tls_context)
+                    self.upstream_address, self.upstream_port,
+                    context=self.upstream_tls_context)
 
             if self.tls_mode == "start_tls":
-                ses.starttls(context=self.tls_context)
+                ses.starttls(context=self.upstream_tls_context)
 
             # -----------------------------------------------------------------
             if self.user and self.password:
@@ -263,7 +284,7 @@ def parse_conf(conf_file):
         conf.read_file(conf_file)
 
         # Various error checking of provided configuration file
-        for section in ['main', 'listen', 'server']:
+        for section in ['main', 'server', 'upstream']:
             if not section in conf:
                 raise Exception(
                     'Section "%s" required in configurationi file' % section)
@@ -369,12 +390,12 @@ def main():
 
     try:
         smtp_server = SMTPProxy(
-            conf['listen']['address'], int(conf['listen']['port']),
             conf['server']['address'], int(conf['server']['port']),
-            conf['server']['user'], conf['server']['password'],
-            conf['server']['ca_store'], conf['server']['tls_mode'],
-            conf['server']['cipher_suites'], conf['server']['tls_version'],
-            verifier)
+            conf['upstream']['address'], int(conf['upstream']['port']),
+            conf['upstream']['user'], conf['upstream']['password'],
+            conf['upstream']['ca_store'], conf['upstream']['tls_mode'],
+            conf['upstream']['cipher_suites'], conf['upstream']['tls_version'],
+            conf['upstream']['crl_check'], verifier)
 
     except Exception as error_msg:
         _log.error('Failed to configure SMTP proxy: "%s"' % error_msg)
@@ -383,7 +404,7 @@ def main():
     # -------------------------------------------------------------------------
     _log.info(
         'Starting Tollur SMTP proxy - listening on %s:%i...'
-        % (conf['listen']['address'], int(conf['listen']['port'])))
+        % (conf['server']['address'], int(conf['server']['port'])))
         
     try:
         asyncore.loop()
