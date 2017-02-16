@@ -4,7 +4,7 @@
 '''tollur - A scriptable SMTP proxy'''
 
 DESCRIPTION=__doc__
-VERSION='0.5 / "Introverted Socialite"'
+VERSION='0.6 / "Cryptic Struggles"'
 URL='https://github.com/a-laget/tollur'
 
 try:
@@ -92,10 +92,6 @@ class SMTPProxy(smtpd.SMTPServer):
     def configure_upstream_tls(self):
         '''Sets up the TLS context for upstream based on user preferences'''
 
-        if self.tls_version:
-            raise Exception(
-                'Configuration of TLS version has not yet been implemented')
-
         _log.debug('Setting up upstream TLS context...')
 
         # Using a tweaked default context to minimize future "crypto rot"
@@ -107,7 +103,22 @@ class SMTPProxy(smtpd.SMTPServer):
 
         context.verify_mode = ssl.CERT_REQUIRED
         context.check_hostname = True
-       
+
+        _log.debug('Configuring TLS protocols for upstream connection')
+
+        context.options |= ssl.OP_NO_SSLv3
+
+        versions = {
+            1.0: ssl.OP_NO_TLSv1, 1.1: ssl.OP_NO_TLSv1_1,
+            1.2: ssl.OP_NO_TLSv1_2}
+
+        if self.tls_version:
+            for version, option in versions.items():
+                if version < self.tls_version:
+                    _log.debug('Disabling upstream TLS version %s' % version)
+                
+                    context.options |= option
+
         if self.upstream_crl_check == 'chain': 
             context.verify_flags = ssl.VERIFY_CRL_CHECK_CHAIN
         
@@ -117,7 +128,6 @@ class SMTPProxy(smtpd.SMTPServer):
         if self.upstream_cipher_suites:
             context.set_ciphers(self.upstream_cipher_suites)
 
-        # TODO: Setup ORing to blacklist non-configured TLS versions
         return context
 
     # -------------------------------------------------------------------------
@@ -125,7 +135,7 @@ class SMTPProxy(smtpd.SMTPServer):
         self, server_address='127.0.0.1', server_port=9025,
         upstream_address=None, upstream_port=25, user=None, password=None,
         ca_store=None, tls_mode='start_tls', upstream_cipher_suites='',
-        tls_version=None, upstream_crl_check='chain', verifier=None):
+        tls_version=1.2, upstream_crl_check='chain', verifier=None):
 
         self.server_address = str(server_address)
         self.server_port = int(server_port)
@@ -141,10 +151,15 @@ class SMTPProxy(smtpd.SMTPServer):
         self.password = password
         self.ca_store = ca_store
         self.tls_mode = tls_mode
-        self.tls_version = tls_version
         self.upstream_cipher_suites = upstream_cipher_suites
         self.upstream_crl_check = upstream_crl_check
         self.verifier = verifier
+        
+        if tls_version:
+            self.tls_version = float(tls_version)
+
+        else:
+            self.tls_version = tls_version
 
         if self.tls_mode:
             self.tls_mode = tls_mode
@@ -190,6 +205,11 @@ class SMTPProxy(smtpd.SMTPServer):
 
             if self.tls_mode == "start_tls":
                 ses.starttls(context=self.upstream_tls_context)
+            
+            if self.tls_mode:
+                _log.debug(
+                    'Established upstream connection - TLS session info: "%s"'
+                    % str(self.upstream_tls_context.session_stats()))
 
             # -----------------------------------------------------------------
             if self.user and self.password:
@@ -197,6 +217,11 @@ class SMTPProxy(smtpd.SMTPServer):
                 ses.login(self.user, self.password)
 
             ses.sendmail(sender, recipients, data)
+            
+            if self.tls_mode:
+                _log.debug(
+                    'Finished upstream connection - TLS session info: "%s"'
+                    % str(self.upstream_tls_context.session_stats()))
 
         except Exception as error_msg:
             _log.error(
@@ -373,6 +398,14 @@ def main():
         sys.exit(1)
 
     setup_logging(conf['main']['log_dest'], conf['main']['log_level'])
+    
+    # -------------------------------------------------------------------------
+    if not conf.getboolean('main', 'iunderstandwhatiamdoing'):
+        _log.error(
+            'Tollur is experimental software - read through the source code, '
+            'example configuration, open issues and try again! :-)')
+
+        sys.exit(3)
 
     # -------------------------------------------------------------------------
     try:

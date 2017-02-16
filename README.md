@@ -1,5 +1,5 @@
 # tollur - A scriptable SMTP proxy
-#### Version 0.5 / "Introverted Socialite"
+#### Version 0.6 / "Cryptic Struggles"
 
 ## Introduction
 Tollur is small SMTP proxy that requires each outgoing message to be "verified" before it's forwarded.  
