@@ -1,5 +1,5 @@
 # tollur - A scriptable SMTP proxy
-#### Version 0.6 / "Cryptic Struggles"
+#### Version 0.7 / "Manipulation Through The Nation"
 
 ## Introduction
 Tollur is small SMTP proxy that passes each incoming message to a user specified "handler" plugin for processing.  
