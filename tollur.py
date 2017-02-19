@@ -5,7 +5,7 @@
 
 DESCRIPTION=__doc__
 VERSION='0.6 / "Cryptic Struggles"'
-URL='https://github.com/a-laget/tollur'
+URL='https://github.com/doctor-love/tollur'
 
 try:
     import logging.handlers
