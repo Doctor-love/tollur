@@ -25,12 +25,16 @@ except ImportError as missing_module:
     sys.exit(3)
 
 # Should probably work with older Python 3 versions as well, but not tested
-if sys.version_info < (3, 5) and ssl.OPENSSL_VERSION_INFO < (0, 9, 8):
+if sys.version_info < (3, 5):
     print('Tollur requires Python 3.5 or later - sorry!\n')
     sys.exit(3)
 
 if ssl.OPENSSL_VERSION_INFO < (0, 9, 8):
     print('Tollur requires OpenSSL 0.9.8 or later - sorry!\n')
+    sys.exit(3)
+
+if sys.platform != 'linux':
+    print('Tollur has only been tested on Linux - sorry!\n')
     sys.exit(3)
 
 _log = logging.getLogger('tollur')
@@ -47,6 +51,18 @@ class DebugToLog:
 
     def flush(self):
         pass
+
+
+# -----------------------------------------------------------------------------
+class MailMessage():
+    '''Object used by handler plugin to manipulate forwarded message'''
+
+    def __init__(self, peer, sender, recipients, data):
+        self.peer = peer
+        self.sender = sender
+        self.recipients = recipients
+        self.data = data
+        self.mid = uuid.uuid4()
 
 
 # -----------------------------------------------------------------------------
@@ -108,6 +124,7 @@ class SMTPProxy(smtpd.SMTPServer):
 
         context.options |= ssl.OP_NO_SSLv3
 
+        # TODO: Add later TLS versions once they have been implemented
         versions = {
             1.0: ssl.OP_NO_TLSv1, 1.1: ssl.OP_NO_TLSv1_1,
             1.2: ssl.OP_NO_TLSv1_2}
@@ -135,14 +152,14 @@ class SMTPProxy(smtpd.SMTPServer):
         self, server_address='127.0.0.1', server_port=9025,
         upstream_address=None, upstream_port=25, user=None, password=None,
         ca_store=None, tls_mode='start_tls', upstream_cipher_suites='',
-        tls_version=1.2, upstream_crl_check='chain', verifier=None):
+        tls_version=1.2, upstream_crl_check='chain', handler=None):
 
         self.server_address = str(server_address)
         self.server_port = int(server_port)
 
-        if upstream_address is None or verifier is None:
+        if upstream_address is None or handler is None:
             raise TypeError(
-                'Argument "upstream_address" and "verifier" are required')
+                'Argument "upstream_address" and "handler" are required')
         
         self.upstream_address = upstream_address
         self.upstream_port = int(upstream_port)
@@ -153,7 +170,7 @@ class SMTPProxy(smtpd.SMTPServer):
         self.tls_mode = tls_mode
         self.upstream_cipher_suites = upstream_cipher_suites
         self.upstream_crl_check = upstream_crl_check
-        self.verifier = verifier
+        self.handler = handler
         
         if tls_version:
             self.tls_version = float(tls_version)
@@ -183,12 +200,12 @@ class SMTPProxy(smtpd.SMTPServer):
             self.channel = smtpd.SMTPChannel(self, connection, address)
     
     # -------------------------------------------------------------------------
-    def _deliver(self, msg_id, sender, recipients, data):
-        '''Sends verified messages with SMTP(S) to server'''
+    def _deliver(self, msg):
+        '''Sends processed messages with SMTP(S) to upstream server'''
 
         _log.info(
             'Delivering message with ID "%s" from "%s" to "%s"'
-            % (msg_id, sender, recipients))
+            % (msg.mid, msg.sender, msg.recipients))
 
         try:
             _log.debug(
@@ -216,7 +233,7 @@ class SMTPProxy(smtpd.SMTPServer):
                 _log.debug('Trying to authenticate as user "%s"' % self.user)
                 ses.login(self.user, self.password)
 
-            ses.sendmail(sender, recipients, data)
+            ses.sendmail(msg.sender, msg.recipients, msg.data)
             
             if self.tls_mode:
                 _log.debug(
@@ -226,9 +243,9 @@ class SMTPProxy(smtpd.SMTPServer):
         except Exception as error_msg:
             _log.error(
                 'Failed to deliver message with ID "%s": "%s"'
-                % (msg_id, error_msg))
+                % (msg.mid, error_msg))
 
-            self.channel.push('451 Error: Could not deliver ID "%s"' % msg_id)
+            self.channel.push('451 Error: Could not deliver ID "%s"' % msg.mid)
 
             return
 
@@ -243,39 +260,41 @@ class SMTPProxy(smtpd.SMTPServer):
             except Exception as error_msg:
                 _log.debug(
                     'Failed to close session gracefully for ID "%s": "%s"'
-                    % (msg_id, error_msg))
+                    % (msg.mid, error_msg))
 
         return                 
 
     # -------------------------------------------------------------------------
     def process_message(self, peer, sender, recipients, data):
-        '''Calls verifier to check if incoming e-mail should be sent'''
+        '''Calls handler to check if incoming e-mail should be sent'''
 
-        msg_id = uuid.uuid4()
+        msg = MailMessage(peer, sender, recipients, data)
 
         _log.info(
             'Proxy received incoming mail - '
             'ID: "%s", peer: "%s", sender: "%s", recipients: "%s"'
-            % (msg_id, peer, sender, recipients))
+            % (msg.mid, msg.peer, msg.sender, msg.recipients))
 
         try:
-            if self.verifier.verify(msg_id, peer, sender, recipients, data):
-                _log.info('Verifier accepted message ID "%s"' % msg_id)
+            forward, msg = self.handler.process(msg)
 
-                self._deliver(msg_id, sender, recipients, data)
+            if forward:
+                _log.info('Handler accepted message ID "%s"' % msg.mid)
+
+                self._deliver(msg)
                 return
 
             else:
-                _log.error('Verifier did not accept message ID "%s"' % msg_id)
+                _log.error('Handler did not accept message ID "%s"' % msg.mid)
             
                 self.channel.push(
-                    '550 Error: ID "%s" was denied by verifier' % msg_id)
+                    '550 Error: ID "%s" was denied by handler' % msg.mid)
 
                 return
 
         except Exception as error_msg:
             raise Exception(
-                'Verifier raised unhandled exception: "%s"' % error_msg)
+                'Handler raised unhandled exception: "%s"' % error_msg)
 
 
 # -----------------------------------------------------------------------------
@@ -314,11 +333,11 @@ def parse_conf(conf_file):
                 raise Exception(
                     'Section "%s" required in configurationi file' % section)
 
-        if not 'verifier' in conf['main']:
-            raise Exception('Verifier needs to be specified in "main" section')
+        if not 'handler' in conf['main']:
+            raise Exception('Handler needs to be specified in "main" section')
 
-        if not 'verifier-' + conf['main']['verifier'] in conf:
-            raise Exception('Configuration section for verifier is required')
+        if not 'handler-' + conf['main']['handler'] in conf:
+            raise Exception('Configuration section for handler is required')
 
     except Exception as error_msg:
         raise Exception('Failed to parse configuration file: "%s"' % error_msg)
@@ -356,31 +375,31 @@ def setup_logging(dest, level):
 
 
 # -----------------------------------------------------------------------------
-def init_verifier(name, conf):
-    '''Loads verifier module and sets it up with provided configuration'''
+def init_handler(name, conf):
+    '''Loads handler module and sets it up with provided configuration'''
 
-    _log.debug('Loding verifier module "%s"' % name)
+    _log.debug('Loading handler module "%s"' % name)
 
     try:
-        verifier_module = importlib.import_module('verifiers.' + name)
+        handler_module = importlib.import_module('handlers.' + name)
 
     except Exception as error_msg:
         raise Exception(
-            'Failed to loader verifier module "%s": "%s"'
+            'Failed to loader handler module "%s": "%s"'
             % (name, error_msg))
 
     # -------------------------------------------------------------------------
-    _log.debug('Initializing verifier module...')
+    _log.debug('Initializing handler module...')
 
     try:
-        verifier = verifier_module.Verifier(conf)
+        handler = handler_module.Handler(conf)
 
     except Exception as error_msg:
         raise Exception(
-            'Failed to initialize verifier module "%s": "%s"'
+            'Failed to initialize handler module "%s": "%s"'
             % (name, error_msg))
 
-    return verifier
+    return handler
 
 
 # -----------------------------------------------------------------------------
@@ -409,8 +428,8 @@ def main():
 
     # -------------------------------------------------------------------------
     try:
-        verifier = conf['main']['verifier']
-        verifier = init_verifier(verifier, conf['verifier-' + verifier])
+        handler = conf['main']['handler']
+        handler = init_handler(handler, conf['handler-' + handler])
 
     except Exception as error_msg:
         _log.error(error_msg)
@@ -428,7 +447,7 @@ def main():
             conf['upstream']['user'], conf['upstream']['password'],
             conf['upstream']['ca_store'], conf['upstream']['tls_mode'],
             conf['upstream']['cipher_suites'], conf['upstream']['tls_version'],
-            conf['upstream']['crl_check'], verifier)
+            conf['upstream']['crl_check'], handler)
 
     except Exception as error_msg:
         _log.error('Failed to configure SMTP proxy: "%s"' % error_msg)

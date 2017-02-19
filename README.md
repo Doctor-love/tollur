@@ -2,19 +2,25 @@
 #### Version 0.6 / "Cryptic Struggles"
 
 ## Introduction
-Tollur is small SMTP proxy that requires each outgoing message to be "verified" before it's forwarded.  
-The verification is performed by a user specified "verifier" plugin, which is basically a Python class with a function that returns True or False for each message based on arbitrary critiera - in other words endless possibilities!
+Tollur is small SMTP proxy that passes each incoming message to a user specified "handler" plugin for processing.  
 
-These verifiers could be used to require user confirmation of external mail, inspect the randomness in PGP MIME or similar.  
+The "handler" plugin is able to inspect the message in order to decide whether or not it should be forwarded.  
+It could also optionally be used to manipulate message properties such as recipients or the body.
 
-The "verifiers" directory contains a simple example of such a plugin, which checks if recipients domains are white list.  
+These "handlers" could be used to require user confirmation of mail to external recipients, inspect the randomness in PGP MIME, minimize information leakage in headers or similar - endless possibilities! :-)
+
+Many of these tasks could likely be performed by a plugin in the user's mail client, but Tollur is designed to work transparently in environments where the clients aren't always trusted.  
+
+A "handler" is just a Python class with a mandatory function that returns True/False and a message object.  
+The "handlers" directory contains a simple example of such a plugin, which implements a recipient white list.  
 
 
 ## Current status
-- Still very alpha, limited testing
+- Still alpha, limited testing
 - Should not be trusted with anything precious, but can be used to proxy mail!
+- Supports strict SMTPS and START_TLS for upstream connection
 - The code and the underlying components ("smtlib" and "smtpd") have not been audited for security issues
-- Suffers from some parallelization issues
+- Suffers from some parallelization issues - see issue #9 for details
 
 
 ## Usage
@@ -22,7 +28,7 @@ At the moment, the code and example configuration is probably the best source fo
 
 
 ## Commercial support
-Triple nine SLA and professional consulting is available for Fortune 500 companies
+Triple nine SLA and professional consulting is available for owners of large sums of Bitcoins
 
 
 ## Dependencies
